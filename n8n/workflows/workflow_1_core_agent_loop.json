@@ -1,0 +1,196 @@
+{
+  "name": "simcore-core-agent-loop",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "simcore-core-loop",
+        "responseMode": "onReceived",
+        "options": {}
+      },
+      "id": "webhook-trigger",
+      "name": "Webhook Trigger",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [80, 220]
+    },
+    {
+      "parameters": {
+        "values": {
+          "string": [
+            { "name": "noise_type", "value": "={{ $json.noise_type || 'gaussian' }}" },
+            { "name": "drift_schedule", "value": "={{ $json.drift_schedule || 'pulse' }}" },
+            { "name": "estimator_method", "value": "={{ $json.estimator_method || 'mmd' }}" },
+            { "name": "n_steps", "value": "={{ $json.n_steps || 20 }}" },
+            { "name": "expose_noise_info", "value": "={{ $json.expose_noise_info || true }}" }
+          ]
+        },
+        "options": {}
+      },
+      "id": "set-config",
+      "name": "Set run config",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 2,
+      "position": [300, 220]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://simcore-api:8000/session/start",
+        "sendBody": true,
+        "jsonBody": "={{ $json }}",
+        "options": {}
+      },
+      "id": "start-session",
+      "name": "POST /session/start",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [520, 220]
+    },
+    {
+      "parameters": {
+        "values": {
+          "number": [
+            { "name": "step", "value": 0 },
+            { "name": "max_steps", "value": "={{ $node['set-config'].json.n_steps }}" },
+            { "name": "drift_events_seen", "value": 0 }
+          ]
+        },
+        "options": {}
+      },
+      "id": "loop-state",
+      "name": "Set loop counters",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 2,
+      "position": [740, 220]
+    },
+    {
+      "parameters": {
+        "batchSize": 1,
+        "options": {}
+      },
+      "id": "split-batches",
+      "name": "Split in Batches",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 2,
+      "position": [960, 220]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://simcore-api:8000/session/{{ $node['start-session'].json['session_id'] }}/step",
+        "sendBody": true,
+        "jsonBody": { "step": "={{ $json.step }}" },
+        "options": {}
+      },
+      "id": "step-loop",
+      "name": "POST /session/{id}/step",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [1180, 220]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{ $json.drift_flag }}",
+              "operation": "is true"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "drift-if",
+      "name": "IF drift_flag == true",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [1400, 220]
+    },
+    {
+      "parameters": {
+        "values": {
+          "number": [
+            { "name": "drift_events_seen", "value": "={{ $node['loop-state'].json.drift_events_seen + 1 }}" }
+          ]
+        },
+        "options": {}
+      },
+      "id": "track-drift",
+      "name": "Increment drift count",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 2,
+      "position": [1620, 120]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://simcore-api:8000/session/{{ $node['start-session'].json['session_id'] }}/reconfigure",
+        "sendBody": true,
+        "jsonBody": {
+          "estimator_method": "={{ $json.estimator_method || 'mmd' }}",
+          "expose_noise_info": "={{ $json.expose_noise_info || true }}",
+          "inject_drift": true
+        },
+        "options": {}
+      },
+      "id": "reconfigure-session",
+      "name": "POST /session/{id}/reconfigure",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [1840, 120]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://simcore-api:8000/session/{{ $node['start-session'].json['session_id'] }}/end",
+        "sendBody": true,
+        "jsonBody": {},
+        "options": {}
+      },
+      "id": "end-session",
+      "name": "POST /session/{id}/end",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [2060, 220]
+    }
+  ],
+  "connections": {
+    "webhook-trigger": {
+      "main": [[{ "node": "set-config", "type": "main", "index": 0 }]]
+    },
+    "set-config": {
+      "main": [[{ "node": "start-session", "type": "main", "index": 0 }]]
+    },
+    "start-session": {
+      "main": [[{ "node": "loop-state", "type": "main", "index": 0 }]]
+    },
+    "loop-state": {
+      "main": [[{ "node": "split-batches", "type": "main", "index": 0 }]]
+    },
+    "split-batches": {
+      "main": [[{ "node": "step-loop", "type": "main", "index": 0 }]]
+    },
+    "step-loop": {
+      "main": [[{ "node": "drift-if", "type": "main", "index": 0 }]]
+    },
+    "drift-if": {
+      "true": [[{ "node": "track-drift", "type": "main", "index": 0 }]],
+      "false": [[{ "node": "end-session", "type": "main", "index": 0 }]]
+    },
+    "track-drift": {
+      "main": [[{ "node": "reconfigure-session", "type": "main", "index": 0 }]]
+    },
+    "reconfigure-session": {
+      "main": [[{ "node": "end-session", "type": "main", "index": 0 }]]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "tags": [{"name": "simcore"}],
+  "triggerCount": 1,
+  "updatedAt": "2026-09-30T07:23:00.000Z",
+  "versionId": "1"
+}

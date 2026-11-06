@@ -1,0 +1,47 @@
+[build-system]
+requires = [
+    "setuptools>=68",
+    "wheel",
+    "Cython>=3.0",
+    "numpy",
+]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "simcore"
+version = "0.1.0"
+description = "Distribution-free noise estimation and time-varying kernel dynamics simulation package"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "jax",
+    "jaxlib",
+    "flax",
+    "chex",
+    "optax",
+    "numpy",
+    "scipy",
+    "distrax",
+    "pytest",
+    "hypothesis",
+    "fastapi",
+    "uvicorn",
+]
+
+[project.optional-dependencies]
+dev = [
+    "black",
+    "ruff",
+    "mypy",
+    "pre-commit",
+]
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["simcore*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

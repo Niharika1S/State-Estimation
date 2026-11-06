@@ -1,0 +1,268 @@
+{
+  "name": "simcore-tool-integration-harness",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "simcore-tool-integration",
+        "responseMode": "onReceived",
+        "options": {}
+      },
+      "id": "manual-trigger",
+      "name": "Manual Trigger",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [80, 220]
+    },
+    {
+      "parameters": {
+        "url": "http://simcore-api:8000/estimators",
+        "method": "GET",
+        "options": {}
+      },
+      "id": "get-estimators",
+      "name": "GET /estimators",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [300, 80]
+    },
+    {
+      "parameters": {
+        "url": "http://simcore-api:8000/kernels",
+        "method": "GET",
+        "options": {}
+      },
+      "id": "get-kernels",
+      "name": "GET /kernels",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [300, 220]
+    },
+    {
+      "parameters": {
+        "url": "http://simcore-api:8000/policies",
+        "method": "GET",
+        "options": {}
+      },
+      "id": "get-policies",
+      "name": "GET /policies",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [300, 360]
+    },
+    {
+      "parameters": {
+        "mode": "combine",
+        "combineBy": "id",
+        "fieldsToMatch": [],
+        "output": "array",
+        "options": {}
+      },
+      "id": "merge-module-lists",
+      "name": "Merge module registry",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3,
+      "position": [560, 220]
+    },
+    {
+      "parameters": {
+        "batchSize": 1,
+        "options": {}
+      },
+      "id": "split-modules",
+      "name": "Split in Batches (modules)",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 2,
+      "position": [780, 220]
+    },
+    {
+      "parameters": {
+        "values": {
+          "string": [
+            { "name": "module_type", "value": "={{ $json.type || 'estimator' }}" },
+            { "name": "module_name", "value": "={{ $json.name || 'mmd' }}" }
+          ]
+        },
+        "options": {}
+      },
+      "id": "set-module-selection",
+      "name": "Set selected module",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 2,
+      "position": [1000, 220]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://simcore-api:8000/session/start",
+        "sendBody": true,
+        "jsonBody": {
+          "noise_estimator": "={{ $json.module_name }}",
+          "estimator_method": "={{ $json.module_name }}",
+          "kernel_name": "rbf",
+          "policy_name": "mpc_policy",
+          "initial_state": [0.0, 0.3],
+          "n_steps": 20,
+          "expose_noise_info": true,
+          "noise_distribution": "gaussian"
+        },
+        "options": {}
+      },
+      "id": "start-module-session",
+      "name": "POST /session/start",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [1220, 220]
+    },
+    {
+      "parameters": {
+        "batchSize": 20,
+        "options": {}
+      },
+      "id": "inner-batch-step",
+      "name": "Split in Batches (20-step smoke test)",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 2,
+      "position": [1440, 220]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://simcore-api:8000/session/{{ $node['start-module-session'].json['session_id'] }}/step",
+        "sendBody": true,
+        "jsonBody": {},
+        "options": {}
+      },
+      "id": "module-step",
+      "name": "HTTP Request /step",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [1660, 220]
+    },
+    {
+      "parameters": {
+        "jsCode": "const result = $json;\nconst ok = !Number.isNaN(Number(result?.belief?.mean?.[0])) && !Number.isFinite(Number(result?.belief?.mean?.[0])) === false;\nreturn { ok, module: $('Set selected module').item.json.module_name, response: result };"
+      },
+      "id": "assert-module-response",
+      "name": "Assertions / pass-fail check",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1880, 220]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            { "value1": "={{ $json.ok }}", "operation": "is true" }
+          ]
+        },
+        "options": {}
+      },
+      "id": "assert-if",
+      "name": "IF assertions pass?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [2100, 220]
+    },
+    {
+      "parameters": {
+        "values": {
+          "string": [
+            { "name": "status", "value": "pass" },
+            { "name": "module_name", "value": "={{ $node['Set selected module'].json.module_name }}" }
+          ]
+        },
+        "options": {}
+      },
+      "id": "pass-record",
+      "name": "Set pass record",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 2,
+      "position": [2320, 120]
+    },
+    {
+      "parameters": {
+        "values": {
+          "string": [
+            { "name": "status", "value": "fail" },
+            { "name": "module_name", "value": "={{ $node['Set selected module'].json.module_name }}" },
+            { "name": "error_detail", "value": "={{ JSON.stringify($json) }}" }
+          ]
+        },
+        "options": {}
+      },
+      "id": "fail-record",
+      "name": "Set fail record",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 2,
+      "position": [2320, 320]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://simcore-api:8000/session/{{ $node['start-module-session'].json['session_id'] }}/end",
+        "sendBody": true,
+        "jsonBody": {},
+        "options": {}
+      },
+      "id": "end-module-session",
+      "name": "POST /session/{id}/end",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [2540, 220]
+    }
+  ],
+  "connections": {
+    "manual-trigger": {
+      "main": [[{ "node": "get-estimators", "type": "main", "index": 0 }]]
+    },
+    "get-estimators": {
+      "main": [[{ "node": "merge-module-lists", "type": "main", "index": 0 }]]
+    },
+    "get-kernels": {
+      "main": [[{ "node": "merge-module-lists", "type": "main", "index": 1 }]]
+    },
+    "get-policies": {
+      "main": [[{ "node": "merge-module-lists", "type": "main", "index": 2 }]]
+    },
+    "merge-module-lists": {
+      "main": [[{ "node": "split-modules", "type": "main", "index": 0 }]]
+    },
+    "split-modules": {
+      "main": [[{ "node": "set-module-selection", "type": "main", "index": 0 }]]
+    },
+    "set-module-selection": {
+      "main": [[{ "node": "start-module-session", "type": "main", "index": 0 }]]
+    },
+    "start-module-session": {
+      "main": [[{ "node": "inner-batch-step", "type": "main", "index": 0 }]]
+    },
+    "inner-batch-step": {
+      "main": [[{ "node": "module-step", "type": "main", "index": 0 }]]
+    },
+    "module-step": {
+      "main": [[{ "node": "assert-module-response", "type": "main", "index": 0 }]]
+    },
+    "assert-module-response": {
+      "main": [[{ "node": "assert-if", "type": "main", "index": 0 }]]
+    },
+    "assert-if": {
+      "true": [[{ "node": "pass-record", "type": "main", "index": 0 }]],
+      "false": [[{ "node": "fail-record", "type": "main", "index": 0 }]]
+    },
+    "pass-record": {
+      "main": [[{ "node": "end-module-session", "type": "main", "index": 0 }]]
+    },
+    "fail-record": {
+      "main": [[{ "node": "end-module-session", "type": "main", "index": 0 }]]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "tags": [{"name": "simcore"}],
+  "triggerCount": 1,
+  "updatedAt": "2026-09-30T07:25:00.000Z",
+  "versionId": "1"
+}

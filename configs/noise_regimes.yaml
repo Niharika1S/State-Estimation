@@ -1,0 +1,9 @@
+noise_distributions:
+  - gaussian
+  - laplace
+  - student_t
+  - mixture
+regime_change_points:
+  - 0
+  - 50
+  - 100

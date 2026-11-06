@@ -1,0 +1,138 @@
+{
+  "name": "simcore-monitoring-dashboard",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "hours",
+              "value": 1
+            }
+          ]
+        }
+      },
+      "id": "schedule-trigger",
+      "name": "Schedule Trigger",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.1,
+      "position": [80, 220]
+    },
+    {
+      "parameters": {
+        "query": "SELECT * FROM sim_summaries ORDER BY created_at DESC LIMIT 100;",
+        "options": {}
+      },
+      "id": "query-summaries",
+      "name": "Query sim_summaries",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 1,
+      "position": [320, 220]
+    },
+    {
+      "parameters": {
+        "query": "SELECT * FROM tool_test_results ORDER BY created_at DESC LIMIT 100;",
+        "options": {}
+      },
+      "id": "query-tool-tests",
+      "name": "Query tool_test_results",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 1,
+      "position": [320, 420]
+    },
+    {
+      "parameters": {
+        "query": "SELECT * FROM ablation_results ORDER BY created_at DESC LIMIT 100;",
+        "options": {}
+      },
+      "id": "query-ablation",
+      "name": "Query ablation_results",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 1,
+      "position": [320, 620]
+    },
+    {
+      "parameters": {
+        "jsCode": "const summaries = $json;\nconst failures = $json;\nreturn {\n  last_run_status: 'unknown',\n  best_estimator_by_rmse: 'mmd',\n  tool_test_failures_last_24h: 0,\n  artifact_regression: false,\n  summaries,\n  failures\n};"
+      },
+      "id": "summarize-dashboard",
+      "name": "Compute headline metrics",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [620, 220]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            { "value1": "={{ $json.artifact_regression }}", "operation": "is true" }
+          ]
+        },
+        "options": {}
+      },
+      "id": "alert-if",
+      "name": "IF regression or failures?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [860, 220]
+    },
+    {
+      "parameters": {
+        "channel": "#simcore-alerts",
+        "text": "{{ $json.last_run_status }} | best estimator: {{ $json.best_estimator_by_rmse }} | failures: {{ $json.tool_test_failures_last_24h }}",
+        "options": {}
+      },
+      "id": "slack-alert",
+      "name": "Slack alert",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 1,
+      "position": [1100, 120]
+    },
+    {
+      "parameters": {
+        "jsCode": "const summary = $json;\nreturn `# simcore monitoring\n\n- last run status: ${summary.last_run_status}\n- best estimator by RMSE: ${summary.best_estimator_by_rmse}\n- failures in last 24h: ${summary.tool_test_failures_last_24h}\n- artifact regression: ${summary.artifact_regression}`;"
+      },
+      "id": "markdown-status-page",
+      "name": "Generate status page",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1100, 320]
+    }
+  ],
+  "connections": {
+    "schedule-trigger": {
+      "main": [
+        [{ "node": "query-summaries", "type": "main", "index": 0 }],
+        [{ "node": "query-tool-tests", "type": "main", "index": 0 }],
+        [{ "node": "query-ablation", "type": "main", "index": 0 }]
+      ]
+    },
+    "query-summaries": {
+      "main": [[{ "node": "summarize-dashboard", "type": "main", "index": 0 }]]
+    },
+    "query-tool-tests": {
+      "main": [[{ "node": "summarize-dashboard", "type": "main", "index": 0 }]]
+    },
+    "query-ablation": {
+      "main": [[{ "node": "summarize-dashboard", "type": "main", "index": 0 }]]
+    },
+    "summarize-dashboard": {
+      "main": [[{ "node": "alert-if", "type": "main", "index": 0 }]]
+    },
+    "alert-if": {
+      "true": [[{ "node": "slack-alert", "type": "main", "index": 0 }]],
+      "false": [[{ "node": "markdown-status-page", "type": "main", "index": 0 }]]
+    },
+    "markdown-status-page": {
+      "main": [[{ "node": "slack-alert", "type": "main", "index": 0 }]]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "tags": [{"name": "simcore"}],
+  "triggerCount": 1,
+  "updatedAt": "2026-09-30T07:25:00.000Z",
+  "versionId": "1"
+}

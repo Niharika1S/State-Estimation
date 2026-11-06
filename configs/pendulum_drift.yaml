@@ -1,0 +1,6 @@
+gravity: 9.81
+length: 1.0
+damping: 0.05
+noise_distribution: gaussian
+noise_scale: 0.05
+regime_schedule: [0, 1, 0, 1]

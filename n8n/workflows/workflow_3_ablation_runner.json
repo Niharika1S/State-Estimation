@@ -1,0 +1,165 @@
+{
+  "name": "simcore-ablation-runner",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "simcore-ablation-runner",
+        "responseMode": "onReceived",
+        "options": {}
+      },
+      "id": "manual-trigger",
+      "name": "Manual Trigger",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [80, 220]
+    },
+    {
+      "parameters": {
+        "jsCode": "const noiseTypes = ['gaussian','laplace','student_t','mixture'];\nconst driftSchedules = ['none','linear','pulse'];\nconst estimators = ['als','mmd','conformal','correntropy'];\nconst exposeNoiseInfo = [false, true];\nconst llmSupervisor = [false, true];\nconst grid = [];\nfor (const noiseType of noiseTypes) {\n  for (const driftSchedule of driftSchedules) {\n    for (const estimatorMethod of estimators) {\n      for (const expose of exposeNoiseInfo) {\n        for (const llmEnabled of llmSupervisor) {\n          grid.push({ noise_type: noiseType, drift_schedule: driftSchedule, estimator_method: estimatorMethod, expose_noise_info: expose, llm_supervisor: llmEnabled });\n        }\n      }\n    }\n  }\n}\nreturn grid;"
+      },
+      "id": "build-grid",
+      "name": "Build parameter grid",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [320, 220]
+    },
+    {
+      "parameters": {
+        "batchSize": 1,
+        "options": {}
+      },
+      "id": "split-grid",
+      "name": "Split in Batches (grid)",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 2,
+      "position": [560, 220]
+    },
+    {
+      "parameters": {
+        "values": {
+          "string": [
+            { "name": "noise_type", "value": "={{ $json.noise_type || 'gaussian' }}" },
+            { "name": "drift_schedule", "value": "={{ $json.drift_schedule || 'none' }}" },
+            { "name": "estimator_method", "value": "={{ $json.estimator_method || 'mmd' }}" },
+            { "name": "expose_noise_info", "value": "={{ $json.expose_noise_info || true }}" },
+            { "name": "llm_supervisor", "value": "={{ $json.llm_supervisor || false }}" }
+          ]
+        },
+        "options": {}
+      },
+      "id": "set-config",
+      "name": "Set grid config",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 2,
+      "position": [780, 220]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://simcore-api:8000/session/start",
+        "sendBody": true,
+        "jsonBody": {
+          "noise_type": "={{ $json.noise_type }}",
+          "drift_schedule": "={{ $json.drift_schedule }}",
+          "noise_estimator": "={{ $json.estimator_method }}",
+          "estimator_method": "={{ $json.estimator_method }}",
+          "expose_noise_info": "={{ $json.expose_noise_info }}",
+          "llm_supervisor": "={{ $json.llm_supervisor }}",
+          "n_steps": 50,
+          "initial_state": [0.0, 0.3],
+          "seed": 42
+        },
+        "options": {}
+      },
+      "id": "start-session",
+      "name": "POST /session/start",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [1000, 220]
+    },
+    {
+      "parameters": {
+        "batchSize": 50,
+        "options": {}
+      },
+      "id": "step-loop",
+      "name": "Split in Batches (episode steps)",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 2,
+      "position": [1220, 220]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://simcore-api:8000/session/{{ $node['start-session'].json['session_id'] }}/step",
+        "sendBody": true,
+        "jsonBody": {},
+        "options": {}
+      },
+      "id": "step-request",
+      "name": "POST /session/{id}/step",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [1440, 220]
+    },
+    {
+      "parameters": {
+        "jsCode": "const summary = $json;\nreturn {\n  session_id: $('POST /session/start').item.json.session_id,\n  rmse: summary.rmse ?? 0,\n  coverage: summary.coverage ?? 0,\n  total_cost: summary.step_cost ?? 0,\n  drift_flag: summary.drift_flag ?? false\n};"
+      },
+      "id": "extract-summary",
+      "name": "Extract final metrics",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1660, 220]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://simcore-api:8000/session/{{ $node['start-session'].json['session_id'] }}/end",
+        "sendBody": true,
+        "jsonBody": {},
+        "options": {}
+      },
+      "id": "end-session",
+      "name": "POST /session/{id}/end",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [1880, 220]
+    }
+  ],
+  "connections": {
+    "manual-trigger": {
+      "main": [[{ "node": "build-grid", "type": "main", "index": 0 }]]
+    },
+    "build-grid": {
+      "main": [[{ "node": "split-grid", "type": "main", "index": 0 }]]
+    },
+    "split-grid": {
+      "main": [[{ "node": "set-config", "type": "main", "index": 0 }]]
+    },
+    "set-config": {
+      "main": [[{ "node": "start-session", "type": "main", "index": 0 }]]
+    },
+    "start-session": {
+      "main": [[{ "node": "step-loop", "type": "main", "index": 0 }]]
+    },
+    "step-loop": {
+      "main": [[{ "node": "step-request", "type": "main", "index": 0 }]]
+    },
+    "step-request": {
+      "main": [[{ "node": "extract-summary", "type": "main", "index": 0 }]]
+    },
+    "extract-summary": {
+      "main": [[{ "node": "end-session", "type": "main", "index": 0 }]]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "tags": [{"name": "simcore"}],
+  "triggerCount": 1,
+  "updatedAt": "2026-09-30T07:25:00.000Z",
+  "versionId": "1"
+}
